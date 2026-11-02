@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI 동물 판별기</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8.3/dist/teachablemachine-image.min.js"></script>
+  <style>
+    :root { --ink:#24342d; --muted:#718078; --green:#527b62; --pale:#edf4ee; --line:#e1e9e2; }
+    * { box-sizing:border-box; }
+    body {
+      margin:0; min-height:100vh; font-family:Arial,"Malgun Gothic",sans-serif;
+      color:var(--ink); background:linear-gradient(135deg,#f4f8f3,#e8f0e9);
+      display:flex; justify-content:center; padding:36px 16px;
+    }
+    .wrap { width:min(760px,100%); }
+    header { text-align:center; margin-bottom:26px; }
+    .eyebrow { color:var(--green); font-size:12px; font-weight:700; letter-spacing:2px; }
+    h1 { margin:10px 0 8px; font-size:clamp(28px,5vw,40px); }
+    .sub { color:var(--muted); line-height:1.6; margin:0; }
+    .panel {
+      background:#fff; border:1px solid var(--line); border-radius:22px;
+      padding:24px; box-shadow:0 12px 35px rgba(40,65,48,.08);
+    }
+    .status { display:flex; align-items:center; gap:9px; color:var(--muted); font-size:13px; margin-bottom:18px; }
+    .dot { width:9px; height:9px; border-radius:50%; background:#d49a42; }
+    .dot.ready { background:#55a36d; }
+    .preview {
+      width:100%; min-height:260px; border:2px dashed #d7e3d8; border-radius:16px;
+      background:#f8fbf8; display:flex; align-items:center; justify-content:center;
+      overflow:hidden; color:var(--muted); text-align:center; padding:14px;
+    }
+    .preview img { display:block; max-width:100%; max-height:390px; object-fit:contain; border-radius:10px; }
+    .placeholder .symbol { font-size:48px; margin-bottom:10px; }
+    .actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:16px; }
+    button,.file-label {
+      border:0; border-radius:12px; padding:12px 17px; font-size:14px; font-weight:700;
+      cursor:pointer; transition:.15s; display:inline-flex; align-items:center; justify-content:center;
+    }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    .primary,.file-label { background:var(--green); color:white; }
+    .secondary { background:var(--pale); color:var(--green); }
+    button:hover,.file-label:hover { transform:translateY(-1px); filter:brightness(.98); }
+    input[type=file] { display:none; }
+    #webcam-container { margin-top:14px; display:flex; justify-content:center; }
+    #webcam-container canvas { max-width:100%; border-radius:14px; }
+    .result { margin-top:22px; display:none; }
+    .result h2 { font-size:18px; margin:0 0 12px; }
+    .top-result { background:var(--pale); border-radius:15px; padding:18px; margin-bottom:18px; }
+    .top-label { color:var(--muted); font-size:13px; }
+    .top-name { font-size:30px; font-weight:800; margin:5px 0; }
+    .top-percent { color:var(--green); font-weight:800; font-size:18px; }
+    .bar-row { margin:13px 0; }
+    .bar-head { display:flex; justify-content:space-between; font-size:14px; margin-bottom:7px; }
+    .track { height:11px; background:#edf1ed; border-radius:20px; overflow:hidden; }
+    .fill { height:100%; width:0; background:linear-gradient(90deg,#7da78a,#477557); border-radius:20px; transition:width .35s; }
+    .hint { margin:18px 0 0; color:var(--muted); font-size:12px; line-height:1.6; }
+    .error { color:#b34545; font-size:13px; margin-top:12px; white-space:pre-wrap; }
+    footer { text-align:center; color:#87938a; font-size:12px; margin:18px 0 0; }
+
+    /* ===== 동물 정보 기능 ===== */
+    .animal-info { margin-top:18px; border:1px solid var(--line); border-radius:15px; padding:18px; background:#fff; animation:fadeUp .35s ease; }
+    .animal-info h3 { margin:0 0 8px; font-size:18px; }
+    .animal-info .summary { margin:0 0 14px; color:var(--ink); line-height:1.7; font-size:15px; }
+    .low-conf { background:#fff6e6; color:#8a5a12; border-radius:10px; padding:10px 12px; font-size:13px; line-height:1.5; margin-bottom:12px; }
+    .info-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
+    .info-item { background:var(--pale); border-radius:12px; padding:12px 13px; }
+    .info-item .k { font-size:12px; font-weight:700; color:var(--green); margin-bottom:5px; }
+    .info-item .v { font-size:14px; line-height:1.6; }
+    .guide { margin-top:26px; }
+    .guide h2 { font-size:20px; margin:0 0 4px; text-align:center; }
+    .guide .guide-sub { text-align:center; color:var(--muted); font-size:13px; margin:0 0 16px; }
+    .cards { display:grid; grid-template-columns:repeat(2,1fr); gap:14px; }
+    .card { background:#fff; border:2px solid var(--line); border-radius:20px; padding:20px; box-shadow:0 8px 24px rgba(40,65,48,.06); transition:.2s; }
+    .card.active { border-color:var(--green); box-shadow:0 10px 30px rgba(82,123,98,.22); transform:translateY(-2px); }
+    .card .emoji { font-size:44px; line-height:1; }
+    .card h3 { margin:10px 0 4px; font-size:22px; }
+    .card .latin { color:var(--muted); font-size:12px; font-style:italic; margin-bottom:12px; }
+    .card dl { margin:0; }
+    .card dt { font-size:12px; font-weight:700; color:var(--green); margin-top:11px; }
+    .card dd { margin:3px 0 0; font-size:14px; line-height:1.6; }
+    @keyframes fadeUp { from{opacity:0; transform:translateY(8px)} to{opacity:1; transform:none} }
+    @media(max-width:620px) { .cards,.info-grid{grid-template-columns:1fr} }
+    @media(max-width:520px) { .panel{padding:17px} .actions>*{flex:1} }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <header>
+      <div class="eyebrow">AI IMAGE CLASSIFIER</div>
+      <h1>🦦 AI 동물 판별기</h1>
+      <p class="sub">사진을 올리면 인공지능이 족제비와 수달 중<br>어떤 동물인지 예측해 줍니다.</p>
+    </header>
+
+    <section class="panel">
+      <div class="status"><span id="statusDot" class="dot"></span><span id="statusText">AI 모델을 불러오는 중...</span></div>
+
+      <div class="preview" id="preview">
+        <div class="placeholder">
+          <div class="symbol">🐾</div>
+          <strong>동물 사진을 선택해 주세요</strong>
+          <div style="font-size:13px;margin-top:7px">이미지 파일을 업로드하거나 카메라를 이용할 수 있어요.</div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <label class="file-label" for="imageInput">📁 사진 업로드</label>
+        <input id="imageInput" type="file" accept="image/*">
+        <button class="secondary" id="cameraBtn" disabled>📷 카메라 켜기</button>
+        <button class="secondary" id="stopBtn" disabled>카메라 끄기</button>
+        <button class="primary" id="predictBtn" disabled>🔍 동물 판별하기</button>
+      </div>
+      <div id="webcam-container"></div>
+      <div id="error" class="error"></div>
+
+      <section class="result" id="result">
+        <h2>판별 결과</h2>
+        <div class="top-result">
+          <div class="top-label">가장 가능성이 높은 동물</div>
+          <div class="top-name" id="topName">-</div>
+          <div class="top-percent" id="topPercent">0%</div>
+        </div>
+        <h2>동물별 예측 확률</h2>
+        <div id="predictions"></div>
+        <div id="animalInfo"></div>
+        <p class="hint">※ 결과는 업로드한 사진과 학습 데이터에 따라 달라질 수 있으며, 실제 동물 판별을 보장하지 않습니다.</p>
+      </section>
+    </section>
+
+    <section class="guide" id="guide">
+      <h2>📖 족제비·수달 알아보기</h2>
+      <p class="guide-sub">AI가 판별하는 두 동물의 특징을 비교해 보세요.</p>
+      <div class="cards" id="cards"></div>
+    </section>
+
+    <footer>Teachable Machine 이미지 분류 모델 기반</footer>
+  </main>
+
+<script>
+  const MODEL_URL = "./model.json";
+  const METADATA_URL = "./metadata.json";
+
+  let model = null;
+  let selectedImage = null;
+  let webcam = null;
+
+  const $ = (id) => document.getElementById(id);
+  const setStatus = (message, ready=false) => {
+    $("statusText").textContent = message;
+    $("statusDot").classList.toggle("ready", ready);
+  };
+
+
+  // ===== 동물 정보 데이터 (metadata.json의 labels와 이름이 같아야 합니다) =====
+  const ANIMALS = {
+    "족제비": {
+      emoji: "🐾",
+      latin: "Mustela sibirica (시베리아족제비)",
+      summary: "몸이 가늘고 길며 민첩한 육식성 포유류예요. 쥐 같은 작은 동물을 잘 잡아먹어요.",
+      look: "몸이 가늘고 길며 다리는 짧아요. 털은 황갈색~갈색이고, 꼬리는 길고 풍성해요. 몸길이는 약 30cm 안팎이에요.",
+      food: "쥐 같은 설치류, 개구리, 물고기, 곤충, 작은 새 등을 먹는 육식성이에요.",
+      habitat: "산기슭, 숲 가장자리, 개울가, 농경지, 마을 근처 등 다양한 곳에서 살아요.",
+      traits: "몸이 유연해서 좁은 틈도 잘 드나들어요. 주로 혼자 지내며 해질녘과 밤에 활발하게 움직여요."
+    },
+    "수달": {
+      emoji: "🦦",
+      latin: "Lutra lutra (유라시아수달)",
+      summary: "물가에서 생활하는 반수생 포유류예요. 물갈퀴가 있는 발과 유선형 몸으로 수영을 잘하고 물고기 등을 먹어요.",
+      look: "몸이 길고 유선형이에요. 짙은 갈색의 촘촘한 털과 굵고 긴 꼬리가 있고, 발에는 물갈퀴가 있어요. 몸길이는 족제비보다 훨씬 커요.",
+      food: "물고기를 가장 많이 먹고, 가재, 게, 개구리 같은 물가 생물도 먹어요.",
+      habitat: "맑은 강, 호수, 습지, 하천 주변처럼 물이 깨끗한 곳에서 살아요.",
+      traits: "헤엄과 잠수에 뛰어나요. 우리나라에서는 천연기념물이자 멸종위기 야생생물로 보호받고 있어요."
+    }
+  };
+
+  const INFO_FIELDS = [
+    ["look", "👀 생김새"],
+    ["food", "🐟 먹이"],
+    ["habitat", "🌿 생활환경"],
+    ["traits", "⭐ 주요 특징"]
+  ];
+  const LOW_CONFIDENCE = 0.6;  // 이 값보다 확률이 낮으면 안내 문구 표시
+
+  // 하단 상세 정보 카드 만들기
+  function renderCards(activeName = null) {
+    const box = $("cards");
+    box.innerHTML = "";
+    Object.entries(ANIMALS).forEach(([name, a]) => {
+      const card = document.createElement("article");
+      card.className = "card" + (name === activeName ? " active" : "");
+      card.dataset.animal = name;
+
+      const emoji = document.createElement("div");
+      emoji.className = "emoji";
+      emoji.textContent = a.emoji;
+      const title = document.createElement("h3");
+      title.textContent = name;
+      const latin = document.createElement("div");
+      latin.className = "latin";
+      latin.textContent = a.latin;
+
+      const dl = document.createElement("dl");
+      INFO_FIELDS.forEach(([key, label]) => {
+        const dt = document.createElement("dt");
+        dt.textContent = label;
+        const dd = document.createElement("dd");
+        dd.textContent = a[key];
+        dl.append(dt, dd);
+      });
+      card.append(emoji, title, latin, dl);
+      box.appendChild(card);
+    });
+  }
+
+  // 판별 결과에 맞는 동물 정보 자동 표시
+  function renderAnimalInfo(best) {
+    const box = $("animalInfo");
+    box.innerHTML = "";
+    const a = ANIMALS[best.className];
+    if (!a) { renderCards(null); return; }
+
+    const wrap = document.createElement("div");
+    wrap.className = "animal-info";
+
+    const title = document.createElement("h3");
+    title.textContent = a.emoji + " " + best.className + "의 특징";
+    wrap.appendChild(title);
+
+    if (best.probability < LOW_CONFIDENCE) {
+      const warn = document.createElement("div");
+      warn.className = "low-conf";
+      warn.textContent = "확률이 높지 않아 결과가 정확하지 않을 수 있어요. 더 선명한 사진으로 다시 시도해 보세요.";
+      wrap.appendChild(warn);
+    }
+
+    const sum = document.createElement("p");
+    sum.className = "summary";
+    sum.textContent = a.summary;
+    wrap.appendChild(sum);
+
+    const grid = document.createElement("div");
+    grid.className = "info-grid";
+    INFO_FIELDS.forEach(([key, label]) => {
+      const item = document.createElement("div");
+      item.className = "info-item";
+      const k = document.createElement("div");
+      k.className = "k";
+      k.textContent = label;
+      const v = document.createElement("div");
+      v.className = "v";
+      v.textContent = a[key];
+      item.append(k, v);
+      grid.appendChild(item);
+    });
+    wrap.appendChild(grid);
+    box.appendChild(wrap);
+
+    renderCards(best.className);  // 하단 카드에서 해당 동물 강조
+  }
+
+  async function loadModel() {
+    try {
+      model = await tmImage.load(MODEL_URL, METADATA_URL);
+      setStatus("AI 모델 준비 완료", true);
+      $("predictBtn").disabled = false;
+      $("cameraBtn").disabled = false;
+    } catch (err) {
+      setStatus("모델을 불러오지 못했습니다.");
+      $("error").textContent =
+        "모델 파일을 불러오지 못했습니다. index.html, model.json, metadata.json, weights.bin이 같은 폴더에 있는지 확인하고 로컬 웹 서버로 실행해 주세요.\n" + err.message;
+    }
+  }
+
+  $("imageInput").addEventListener("change", (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      $("error").textContent = "이미지 파일을 선택해 주세요.";
+      return;
+    }
+    stopCamera();
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        selectedImage = img;
+        $("preview").innerHTML = "";
+        img.style.maxWidth = "100%";
+        img.style.maxHeight = "390px";
+        img.style.objectFit = "contain";
+        $("preview").appendChild(img);
+        $("result").style.display = "none";
+        $("animalInfo").innerHTML = "";
+        renderCards();
+        $("error").textContent = "";
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  async function startCamera() {
+    try {
+      $("error").textContent = "";
+      webcam = new tmImage.Webcam(320, 320, true);
+      await webcam.setup();
+      await webcam.play();
+      $("webcam-container").innerHTML = "";
+      $("webcam-container").appendChild(webcam.canvas);
+      selectedImage = null;
+      $("cameraBtn").disabled = true;
+      $("stopBtn").disabled = false;
+      $("result").style.display = "none";
+      $("animalInfo").innerHTML = "";
+      renderCards();
+      cameraLoop();
+    } catch (err) {
+      $("error").textContent = "카메라를 사용할 수 없습니다. 브라우저 권한과 HTTPS 또는 localhost 실행 여부를 확인해 주세요.\n" + err.message;
+    }
+  }
+
+  let cameraFrame = null;
+  function cameraLoop() {
+    if (!webcam) return;
+    webcam.update();
+    cameraFrame = requestAnimationFrame(cameraLoop);
+  }
+
+  function stopCamera() {
+    if (cameraFrame) cancelAnimationFrame(cameraFrame);
+    cameraFrame = null;
+    if (webcam) {
+      webcam.stop();
+      webcam = null;
+    }
+    $("webcam-container").innerHTML = "";
+    $("cameraBtn").disabled = !model;
+    $("stopBtn").disabled = true;
+  }
+
+  $("cameraBtn").addEventListener("click", startCamera);
+  $("stopBtn").addEventListener("click", stopCamera);
+
+  $("predictBtn").addEventListener("click", async () => {
+    if (!model) return;
+    const target = webcam ? webcam.canvas : selectedImage;
+    if (!target) {
+      $("error").textContent = "먼저 사진을 업로드하거나 카메라를 켜 주세요.";
+      return;
+    }
+    try {
+      $("error").textContent = "";
+      $("predictBtn").disabled = true;
+      $("predictBtn").textContent = "분석 중...";
+      const predictions = await model.predict(target);
+      predictions.sort((a,b) => b.probability - a.probability);
+      showResults(predictions);
+    } catch (err) {
+      $("error").textContent = "이미지를 분석하지 못했습니다: " + err.message;
+    } finally {
+      $("predictBtn").disabled = false;
+      $("predictBtn").textContent = "🔍 동물 판별하기";
+    }
+  });
+
+  function showResults(predictions) {
+    const best = predictions[0];
+    $("topName").textContent = best.className;
+    $("topPercent").textContent = (best.probability * 100).toFixed(1) + "%";
+    $("predictions").innerHTML = "";
+    predictions.forEach(item => {
+      const percent = item.probability * 100;
+      const row = document.createElement("div");
+      row.className = "bar-row";
+      const head = document.createElement("div");
+      head.className = "bar-head";
+      const name = document.createElement("strong");
+      name.textContent = item.className;
+      const value = document.createElement("span");
+      value.textContent = percent.toFixed(1) + "%";
+      head.append(name, value);
+      const track = document.createElement("div");
+      track.className = "track";
+      const fill = document.createElement("div");
+      fill.className = "fill";
+      fill.style.width = percent + "%";
+      track.appendChild(fill);
+      row.append(head, track);
+      $("predictions").appendChild(row);
+    });
+    renderAnimalInfo(best);
+    $("result").style.display = "block";
+  }
+
+  renderCards();
+  loadModel();
+</script>
+</body>
+</html>
